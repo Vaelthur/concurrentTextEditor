@@ -23,10 +23,13 @@ void EditorController::keyPressEvent(QKeyEvent *key)
 {
     ensureCursorVisible();
     int pressed_key = key->key();
-    int cursorPosition = this->textCursor().position();
     int anchor = this->textCursor().anchor();
-    int deltaPositions = abs(cursorPosition - anchor);
-    int start, end;
+    QTextCursor temp = this->textCursor();
+    temp.setPosition(anchor);
+    QPair<int, int> anchorPosition = QPair<int,int>(temp.blockNumber(),temp.positionInBlock());
+    QPair<int,int> cursorPosition = QPair<int,int>(this->textCursor().blockNumber(),this->textCursor().positionInBlock());
+    //int deltaPositions = abs(cursorPosition - anchor);
+    QPair<int,int> start, end, endBefore;
     Format currentFormat =_currentFormat;
     //get format
     QTextCharFormat charFormat;
@@ -43,13 +46,10 @@ void EditorController::keyPressEvent(QKeyEvent *key)
         completeFilename = _owner + "/" +  _crdt.getFileName();
 
     //take selection if there is one
-    if(deltaPositions != 0){
-        start = anchor > cursorPosition ? cursorPosition : anchor;
-        end = start == anchor ? cursorPosition : anchor;
-    }        
+    takeSelection(cursorPosition, anchorPosition, start, end);
 
     //ctrl-c handler to avoid "HeartBug"
-    if(key->matches(QKeySequence::Copy) || pressed_key == Qt::Key_Control){
+    if(key->matches(QKeySequence::Copy) || pressed_key == Qt::Key_Copy){
         QTextEdit::keyPressEvent(key);
         return;
     }
@@ -62,9 +62,11 @@ void EditorController::keyPressEvent(QKeyEvent *key)
     //ctrl-x handle to avoid "UpArrowBug"
     if(key->matches(QKeySequence::Cut) || pressed_key == Qt::Key_Cut) {
          //cancel the selection (if there is one)
-        if(deltaPositions!=0) {
+        if(start!=end) {
             //Iterate over characters to be removed
-            deleteSelection(start, end);
+            if(_crdt.calcBeforePosition(end, endBefore)) {
+                deleteSelection(start, endBefore);
+            }
         }
         QTextEdit::keyPressEvent(key);
         return;
@@ -78,21 +80,29 @@ void EditorController::keyPressEvent(QKeyEvent *key)
         if(clipText.isNull() || clipText.isEmpty()) {
             return;
         }
-        setCurrentFormat(charFormat);
-        if(deltaPositions!=0) {
-            deleteSelection(start, end);
+        if(start!=end) {
+            if(_crdt.calcBeforePosition(end, endBefore)) {
+                deleteSelection(start, endBefore);
+            }
             //for insert we need to set the position to start, either it's out of range
             cursorPosition=start;
         }
 
-        // Write clipboard text into crdt and broadcast edit        
         for(int writingIndex = 0; writingIndex <  clipText.length(); writingIndex++){
-            _crdt.handleLocalInsert(clipText[writingIndex], cursorPosition, currentFormat);
+            //setCurrentFormat(charFormat, cursorPosition);
+            QChar val = clipText[writingIndex];
+            Format charF = Format::plain;
+            _crdt.handleLocalInsert(val, cursorPosition, charF);
             emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, cursorPosition, _isPublic);
-            cursorPosition++;
+            if(clipText[writingIndex] == '\n' || clipText[writingIndex] == '\r' ) {
+                cursorPosition.first++;
+                cursorPosition.second = 0;
+            } else {
+                cursorPosition.second++;
+            }
+            setFormat(charFormat, charF);
         }
-        this->textCursor().insertText(clipText, charFormat);
-
+        this->textCursor().insertText(clipText,charFormat);
 
         return;
     }
@@ -100,10 +110,12 @@ void EditorController::keyPressEvent(QKeyEvent *key)
     // Handle Char insert or return
     if( (pressed_key >= 0x20 && pressed_key <= 0x0ff && pressed_key != Qt::Key_Control) || pressed_key == Qt::Key_Return || pressed_key == Qt::Key_Tab) {
 
-        setCurrentFormat(charFormat);
+        setCurrentFormat(charFormat, cursorPosition);
         //cancel the selection (if there is one)
-        if(deltaPositions!=0) {
-            deleteSelection(start, end);
+        if(start!=end) {
+            if(_crdt.calcBeforePosition(end, endBefore)) {
+                deleteSelection(start, endBefore);
+            }
             cursorPosition=start;
         }
 
@@ -111,21 +123,25 @@ void EditorController::keyPressEvent(QKeyEvent *key)
         this->textCursor().insertText(key->text().data()[0], charFormat);
         emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, cursorPosition, _isPublic);
 
-
-
         return;
     }
 
     // Handle selection deletion with backspace or delete key
-    if((pressed_key == Qt::Key_Backspace || pressed_key == Qt::Key_Delete) && deltaPositions != 0) {
-        deleteSelection(start, end);
+    if((pressed_key == Qt::Key_Backspace || pressed_key == Qt::Key_Delete) && start!=end) {
+        if(_crdt.calcBeforePosition(end, endBefore)) {
+            deleteSelection(start, endBefore);
+        }
+
     }
 
     // Handle backspace deletion
-    if(pressed_key == Qt::Key_Backspace && (cursorPosition -1) != -1 && deltaPositions == 0) {
+    if(pressed_key == Qt::Key_Backspace && start == end && (this->textCursor().position()-1) != -1) {
 
-        _crdt.handleLocalDelete(cursorPosition -1);
-        emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, cursorPosition -1, _isPublic);
+        QPair<int,int> startBefore;
+        if(_crdt.calcBeforePosition(start, startBefore)) {
+            QList<Char> chars = _crdt.handleLocalDelete(startBefore, startBefore);
+            emit broadcastEditWorker(completeFilename , chars[0], EditType::deletion, startBefore, _isPublic);
+        }
     }
 
 
@@ -133,41 +149,72 @@ void EditorController::keyPressEvent(QKeyEvent *key)
     lastIndex.movePosition(QTextCursor::End);
 
     // Handle "delete" deletion
-    if(pressed_key == Qt::Key_Delete && this->textCursor() != lastIndex && deltaPositions == 0) {
+    if(pressed_key == Qt::Key_Delete && this->textCursor() != lastIndex && start == end) {
 
-        _crdt.handleLocalDelete(cursorPosition);
-        emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, cursorPosition, _isPublic);
+        QPair<int,int> endAfter;
+        if(_crdt.calcAfterPosition(end, endAfter)) {
+            QList<Char> chars = _crdt.handleLocalDelete(endAfter,endAfter);
+            emit broadcastEditWorker(completeFilename , chars[0], EditType::deletion, endAfter, _isPublic);
+        }
     }
 
     // Let the editor do its thing on current text if no handler is found
     QTextEdit::keyPressEvent(key);
 }
 
-void EditorController::deleteSelection(int start, int end) {
+void EditorController::takeSelection(QPair<int,int> cursorPosition, QPair<int,int> anchorPosition, QPair<int,int> & startPos, QPair<int,int> & endPos) {
+    if(cursorPosition.first == anchorPosition.first) {
+        if(cursorPosition.second <= anchorPosition.second) {
+            startPos = cursorPosition;
+            endPos = anchorPosition;
+        } else {
+            startPos = anchorPosition;
+            endPos = cursorPosition;
+        }
+    } else if(cursorPosition.first < anchorPosition.first) {
+        startPos = cursorPosition;
+        endPos = anchorPosition;
+    } else {
+        startPos = anchorPosition;
+        endPos = cursorPosition;
+    }
+}
+
+void EditorController::deleteSelection(QPair<int,int> start, QPair<int,int> end) {
 
     QString completeFilename = _crdt.getFileName();
 
     if(_shared)
         completeFilename = _owner + "/" + _crdt.getFileName();
 
-    for(int floatingCursor =  end; floatingCursor > start; floatingCursor--) {
-        _crdt.handleLocalDelete(floatingCursor - 1);
-        emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, floatingCursor - 1, _isPublic);
+    QList<Char> chars = _crdt.handleLocalDelete(start, end);
+    foreach (Char c, chars) {
+        emit broadcastEditWorker(completeFilename , c, EditType::deletion, QPair<int,int>(), _isPublic);
     }
 }
 
+QList<QPair<QString,Format>> EditorController::getRichClip(QPair<int,int> start, QPair<int,int> end) {
+    QList<QPair<QString,Format>> richClip;
+    if(start.first!=end.first) {
+        richClip = _crdt.takeMultipleBufRows(start,end);
+    } else {
+        richClip = _crdt.takeSingleBufRow(start,end);
+    }
+
+    return richClip;
+}
 
 void EditorController::write(){
 
     QTextCharFormat format;
-    QList<QPair<QString, Format>> textBuffer = _crdt.getTextBuffer();
+    QList<QList<QPair<QString, Format>>> textBuffer = _crdt.getTextBuffer();
 
-    for (auto pair : textBuffer) {
-        setFormat(format, pair.second);
-        this->textCursor().insertText(pair.first, format);
+    for (auto row : textBuffer) {
+        for (auto pair: row) {
+            setFormat(format, pair.second);
+            this->textCursor().insertText(pair.first, format);
+        }
     }
-
-
 }
 
 // Wrappers for crdt methods
@@ -191,7 +238,7 @@ void EditorController::setUserColor(QString user, QColor color) {
 
 void EditorController::handleRemoteEdit(const QJsonObject &qjo) {
 
-    int index;
+    QPair<int,int> position;
     QString user = qjo["username"].toString();
     QTextCursor editingCursor;
     QTextCursor cursorBeforeEdit;
@@ -200,22 +247,21 @@ void EditorController::handleRemoteEdit(const QJsonObject &qjo) {
     charFormat.setBackground(_usersColor[user]);
 
     EditType edit = static_cast<EditType>(qjo["editType"].toInt());
-    Format format = static_cast<Format>(_crdt.getChar(qjo["content"].toObject())._format);
-    bool prova;
+    Format format = static_cast<Format>(qjo["content"].toObject()["format"].toInt());
 
     switch(edit) {
 
         case EditType::insertion:
 
-            index = _crdt.handleRemoteInsert(qjo);
+            position = _crdt.handleRemoteInsert(qjo);
             editingCursor = this->textCursor();
             cursorBeforeEdit= this->textCursor();
-            editingCursor.setPosition(index);
+            editingCursor.setPosition(_crdt.calcIndex(position));
             this->setTextCursor(editingCursor);
             //set format
             setFormat(charFormat, format);
             // Write
-            this->textCursor().insertText(QString(_crdt.getChar(qjo["content"].toObject())._value), charFormat);
+            this->textCursor().insertText(QString(qjo["content"].toObject()["value"].toString()[0]), charFormat);
             // Set cursor back to original position (before editing)
             this->setTextCursor(cursorBeforeEdit);
 
@@ -224,10 +270,10 @@ void EditorController::handleRemoteEdit(const QJsonObject &qjo) {
 
         case EditType::deletion:
 
-            index = _crdt.handleRemoteDelete(qjo);
+            position = _crdt.handleRemoteDelete(qjo);
             editingCursor = this->textCursor();
             cursorBeforeEdit = this->textCursor();
-            editingCursor.setPosition(index + 1);
+            editingCursor.setPosition(_crdt.calcIndex(position) + 1);
             this->setTextCursor(editingCursor);
             this->textCursor().deletePreviousChar();
             this->setTextCursor(cursorBeforeEdit);
@@ -236,10 +282,10 @@ void EditorController::handleRemoteEdit(const QJsonObject &qjo) {
 
         case EditType::format:
             //handle format edit
-            index = _crdt.handleRemoteFormat(qjo);
+            position = _crdt.handleRemoteFormat(qjo);
             editingCursor = this->textCursor();
             cursorBeforeEdit = this->textCursor();
-            editingCursor.setPosition(index);
+            editingCursor.setPosition(_crdt.calcIndex(position));
             this->setTextCursor(editingCursor);
             setFormat(charFormat, format);
             editingCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor);
@@ -287,14 +333,14 @@ Crdt EditorController::getCrdt() {
     return _crdt;
 }
 
-void EditorController::changeFormat(int position, int anchor, Format format) {
+void EditorController::changeFormat(QPair<int,int> position, QPair<int,int> anchor, Format format) {
     if(_currentFormat == format) {
         _currentFormat = Format::plain;
     }
     else {
         _currentFormat = format;
     }
-    int start, end;
+    QPair<int,int> start, end;
 
     QString completeFilename = _crdt.getFileName();
 
@@ -307,28 +353,29 @@ void EditorController::changeFormat(int position, int anchor, Format format) {
     setFormat(cursorFormat,_currentFormat);
     this->textCursor().setCharFormat(cursorFormat);
     //change format on the file (no need to check if deltaPositions != 0 because editor checks if position != anchor
-    if(position != anchor) {
-        start = anchor > position ? position : anchor;
-        end = start == anchor ? position : anchor;
-
-        for(int floatingCursor =  end; floatingCursor > start; floatingCursor--) {
-            _crdt.handleLocalFormat(floatingCursor - 1, _currentFormat);
-            emit broadcastEditWorker(completeFilename , _crdt._lastChar, _crdt._lastOperation, floatingCursor - 1, _isPublic);
+    takeSelection(position,anchor,start,end);
+    if(start != end) {
+        QList<Char> chars = _crdt.handleLocalFormat(start, end, _currentFormat);
+        //change handlelocalformat getting the list of chars to broadcast as return value, then for cycle to broadcast
+        foreach (Char c, chars) {
+            emit broadcastEditWorker(completeFilename , c, EditType::format, QPair<int,int>(), _isPublic);
+            //_crdt.calcBeforePosition(end, end);
         }
     }
 }
 
 
-void EditorController::setCurrentFormat(QTextCharFormat& charFormat){
+void EditorController::setCurrentFormat(QTextCharFormat& charFormat, QPair<int,int> pos){
 
     Format currentFormat;
+    pos.second -= 1;
 
-    if(this->textCursor().position() == 0) {
-        currentFormat = _currentFormat;
-    }
-    else {
-        currentFormat = _crdt.getCurrentFormat(this->textCursor().position() - 1);
-    }
+//    if(this->textCursor().position() == 0) {
+//        currentFormat = _currentFormat;
+//    }
+//    else {
+//        currentFormat = _crdt.getCurrentFormat(pos); //forse la position.second va -1
+//    }
 
     charFormat.setBackground(Qt::white);
     setFormat(charFormat, _currentFormat);

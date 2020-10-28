@@ -39,6 +39,10 @@ Editor::Editor(QWidget *parent, WorkerClient *worker, QString fileName, bool isP
     ui->actionExport_PDF->setIcon(_workerClient->getIcon(UiEditor::pdf));
     ui->actionUnderline->setIcon(_workerClient->getIcon(UiEditor::underlined));
     ui->actionItalics->setIcon(_workerClient->getIcon(UiEditor::italics1));
+
+    _loadMsg.setText("Loading file, please wait...");
+    _loadMsg.setStandardButtons(0);
+    _loadMsg.show();
 }
 
 Editor::~Editor()
@@ -57,18 +61,26 @@ Editor::~Editor()
 void Editor::handleFile(QJsonDocument unparsedFile) {
     //Il document ricevuto viene passato a editorcontroller che lo converte il data structure
     //c++ e lo visualizza
-    if(!ui->editorController->parseCteFile(unparsedFile)){
-        //throw exception;
-    }
+
+    ui->editorController->parseCteFile(unparsedFile);
+
     ui->editorController->write();
+
+    // delete here msg
+    _loadMsg.hide();
 }
 
 void Editor::showUser(QString user) {
     QListWidgetItem *newUser = new QListWidgetItem(user);
-    QColor color = _colors.at(_colorNumber%_colors.size());
-    newUser->setBackground(_colors.at(_colorNumber%_colors.size())); //creare una palette
-    _colorNumber++;
-    ui->editorController->setUserColor(user, color);
+    if(user == _workerClient->getUser()) {
+        newUser->setBackground(QColor(Qt::white));
+        ui->editorController->setUserColor(user, Qt::white);
+    } else {
+        QColor color = _colors.at(_colorNumber%_colors.size());
+        newUser->setBackground(_colors.at(_colorNumber%_colors.size())); //creare una palette
+        _colorNumber++;
+        ui->editorController->setUserColor(user, color);
+    }
     ui->listWidget->addItem(newUser);
     ui->activeUsers->setText("Active users: " + QString::number(ui->listWidget->count()));
 }
@@ -134,28 +146,29 @@ void Editor::on_actionPaste_triggered(){
 void Editor::on_actionBold_triggered()
 {
     setFormatUi(UiEditor::bold1);
-
-    int position = ui->editorController->textCursor().position();
-    int anchor = ui->editorController->textCursor().anchor();
-    ui->editorController->changeFormat(position, anchor, Format::bold);
+    changeFormat(Format::bold);
 }
 
 void Editor::on_actionItalics_triggered()
 {
     setFormatUi(UiEditor::italics1);
-
-    int position = ui->editorController->textCursor().position();
-    int anchor = ui->editorController->textCursor().anchor();
-    ui->editorController->changeFormat(position, anchor, Format::italics);
+    changeFormat(Format::italics);
 }
 
 void Editor::on_actionUnderline_triggered()
 {
     setFormatUi(UiEditor::underlined);
+    changeFormat(Format::underline);
+}
 
-    int position = ui->editorController->textCursor().position();
+void Editor::changeFormat(Format format) {
     int anchor = ui->editorController->textCursor().anchor();
-    ui->editorController->changeFormat(position, anchor, Format::underline);
+    QTextCursor temp = ui->editorController->textCursor();
+    temp.setPosition(anchor);
+    QPair<int, int> anchorPosition = QPair<int,int>(temp.blockNumber(),temp.positionInBlock());
+    QPair<int,int> cursorPosition = QPair<int,int>(ui->editorController->textCursor().blockNumber(),
+                                                   ui->editorController->textCursor().positionInBlock());
+    ui->editorController->changeFormat(cursorPosition, anchorPosition, format);
 }
 
 void Editor::on_actionCopy_triggered()

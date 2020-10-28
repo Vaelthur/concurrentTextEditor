@@ -64,6 +64,9 @@ private:
     };
     int _colorNumber=0;
     bool b=false, i=false, u=false;
+    QMessageBox _loadMsg;
+
+    void changeFormat(Format format);
 };
 
 #endif // EDITOR_H

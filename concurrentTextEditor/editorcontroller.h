@@ -34,21 +34,24 @@ public:
     void italics(int position, int anchor);
     void underline(int position, int anchor);
     void setFormat(QTextCharFormat& charFormat, Format format);
-    void changeFormat(int position, int anchor, Format format);
-    void setCurrentFormat(QTextCharFormat& charFormat);
+    void changeFormat(QPair<int,int> position, QPair<int,int> anchor, Format format);
+    void setCurrentFormat(QTextCharFormat& charFormat, QPair<int,int> pos);
 
 private:
     Crdt _crdt;
-    void deleteSelection(int start, int end);
+    void deleteSelection(QPair<int,int> start, QPair<int,int> end);
+    void takeSelection(QPair<int,int> cursorPosition, QPair<int,int> anchorPosition, QPair<int,int> & startPos, QPair<int,int> & endPos);
     bool _isPublic;
     QMap<QString, QColor> _usersColor;
     bool _shared = false;
     QString _owner = "";
     Format _currentFormat = Format::plain;
+    QList<QPair<QString,Format>> _clipRichText;
     bool isKeySequenceHandled(QKeyEvent* key);
+    QList<QPair<QString,Format>> getRichClip(QPair<int,int> start, QPair<int,int> end);
 
 signals:
-    void broadcastEditWorker(QString fileName, Char c, EditType editType, int index, bool isPublic);
+    void broadcastEditWorker(QString fileName, Char c, EditType editType, QPair<int,int> position, bool isPublic);
 
 public slots:
     void handleRemoteEdit(const QJsonObject &qjo);

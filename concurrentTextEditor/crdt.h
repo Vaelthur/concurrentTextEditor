@@ -20,52 +20,86 @@ public:
     Crdt();    
     Crdt(QString siteID);
     QString getFileName();
-    QList<QPair<QString, Format>> getTextBuffer();
+    QList<QList<QPair<QString, Format>>> getTextBuffer();
+    QJsonObject crdtToJson();
     bool parseCteFile(QJsonDocument unparsedFile);
-    int findInsertIndex(Char c);
-    void handleLocalInsert(QChar val, int index, Format format);
-    void handleLocalDelete(int index);
-    void handleLocalFormat(int index, Format format);
-    Char generateChar(QChar val, int index, Format format);
+    int findInsertIndexInLine(Char c, QList<Char> row);
+    void handleLocalInsert(QChar val, QPair<int, int> rowCh, Format format);
+    QList<Char> handleLocalDelete(QPair<int,int> startPos, QPair<int,int> endPos);
+
+    QList<Char> handleLocalFormat(QPair<int,int> startPos, QPair<int,int> endPos, Format format);
+    QList<Char> chFormatMultipleRows(QPair<int,int> startPos, QPair<int,int> endPos, Format format);
+    QList<Char> chFormatSingleLine(QPair<int,int> startPos, QPair<int,int> endPos, Format format);
+    Char generateChar(QChar val, QPair<int, int> rowCh, Format format);
     QList<Identifier> generatePosBetween(QList<Identifier> posBefore, QList<Identifier> posAfter, QList<Identifier> newPos, int level=0);
     int generateIdBetween(int idBefore, int idAfter, int boundaryStrategy);
 
-    Format getCurrentFormat(int index);
+    Format getCurrentFormat(QPair<int,int> index);
 
     Char getChar(QJsonObject jsonChar);
-    void replaceChar(Char val, int index);
+    QJsonObject setChar(Char c);
+    void replaceChar(Char val, QPair<int,int> rowCh);
 
     // Insertion
-    void insertChar(Char val, int index);
-    void insertText(QChar val, Format format, int index);
+    void insertChar(Char val, QPair<int,int> rowCh);
+    void insertText(QChar val, Format format, QPair<int,int> rowCh);
 
     //  Deletion
     void deleteChar(Char val, int index);
 
-    int handleRemoteInsert(const QJsonObject& qjo);
-    int handleRemoteDelete(const QJsonObject& qjo);
-    int handleRemoteFormat(const QJsonObject& qjo);
+    QPair<int,int> handleRemoteInsert(const QJsonObject& qjo, bool client = true);
+    QPair<int,int> handleRemoteDelete(const QJsonObject& qjo, bool client = true);
+    QPair<int,int> handleRemoteFormat(const QJsonObject& qjo, bool client = true);
 
     Char _lastChar;
     EditType _lastOperation;
     int retrieveStrategy(int level);
     QUuid getSiteID();
-    void updateFileAtIndex(int index, Char c);
-    int findIndexByPosition(Char c);
+    void updateFileAtPosition(int index, Char c);
+    QPair<int,int> findIndexInLine(Char c, QList<Char> row, int pos);
+
+    void mergeRows(int row, bool client = true);
+    void splitRows(int row, int column);
+    void splitRowsBuf(int row, int column);
+    QList<Char> deleteSingleLine(QPair<int,int> startPos, QPair<int,int> endPos);
+    QList<Char> deleteMultipleRows(QPair<int,int> startPos, QPair<int,int> endPos);
+    QList<QPair<QString,Format>> takeMultipleBufRows(QPair<int,int> start, QPair<int,int> end);
+    QList<QPair<QString,Format>> takeSingleBufRow(QPair<int,int> startPos, QPair<int,int> endPos);
+    QPair<int, int> findPosition(Char c);
+    QPair<int, int> findInsertPosition(Char c);
+    QPair<int, int> findEndPosition(Char c, QList<Char> lastLine, int totalLines);
+    QList<Identifier> findPosBefore(QPair<int, int> rowCh);
+    QList<Identifier> findPosAfter(QPair<int, int> rowCh);
+    bool containsReturn(QList<Char> chars);
+    bool cornerCaseHandler(Char c);
+
+    QList<Char> firstRowToEndLine(QPair<int, int> rowCh);
+    QList<Char> lastRowToEndPos(QPair<int,int> endPos);
+    QList<QPair<QString,Format>> firstRowToEndLineBuf(QPair<int, int> startPos);
+    QList<QPair<QString,Format>> lastRowToEndPosBuf(QPair<int, int> endPos);
+
+    int calcIndex(QPair<int, int> rowCh);
+    bool calcBeforePosition(QPair<int,int> start, QPair<int,int> & startBefore);
+    bool calcAfterPosition(QPair<int,int> end, QPair<int,int> & endAfter);
+    
+    void removeChar(Char c, QPair<int,int> index);
 
 private:
-    QList<QPair<QString, Format>> parseFile(QJsonDocument unparsedFile);
+    QList<QList<QPair<QString, Format>>> parseFile(QJsonDocument unparsedFile);
 
-    int _base = 32;
-    int _boundary = 10;
+    int _base = 64;
+    int _boundary = 200;
     int _mult = 2;
 
     QString _fileName;
     QUuid _siteID;
-    QList<QPair<QString, Format>> _textBuffer;
-    // File representation
-    QList<Char> _file;     
-    int _strategy;
+    QList<QList<QPair<QString, Format>>> _textBuffer;
+    // File representation: TO CHANGE, IT MUST BE LIKE A MATRIX
+    //QList<Char> _file;
+    //QList<QPair<QPair<int, int>, Char>> _file;
+    //QVector<QVector<Char>> _file;
+    QList<QList<Char>> _file;
+    int _strategy = 'plus';
 };
 
 

@@ -91,6 +91,7 @@ private:
 
     // UTILITIES
     QJsonObject createFileData(QFileInfoList file_data, bool isPublic);
+    void saveFile(QString filename);
     bool checkFilenameAvailability(QString filename, QString username, bool isPublic);
     bool checkFilenameInDirectory(QString filename, QDir directory, bool isPublic);
     bool checkUsernameAvailability(QString n_usn);
@@ -112,6 +113,7 @@ private:
     void editHandler(WorkerServer& sender, const QJsonObject &doc);
     void inviteHandler(WorkerServer &sender, const QJsonObject &doc);
     void deleteFileHandler(WorkerServer &sender, const QJsonObject &doc);
+    int GetActiveConnectionsNumber(QString fileName, QString effectiveFileName);
 
     //Edit handlers
     void insertionHandler(const QJsonObject &doc, WorkerServer &sender);
