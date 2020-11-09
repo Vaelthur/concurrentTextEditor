@@ -1,5 +1,7 @@
 # concurrentTextEditor
-Concurrent text editor project. 
+Concurrent text editor project.
+
+Evaluation: 9 / 9
 
 Naming conventions
  - Types start with capitals: MyClass - MyTemplate - MyNamespace
